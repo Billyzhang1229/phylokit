@@ -27,6 +27,16 @@ def _sackin_index(virtual_root, left_child, right_sib):
 
 
 def sackin_index(tree):
+    """
+    Returns the Sackin imbalance index for this tree.
+
+    .. seealso::
+        See `Shao and Sokal (1990) <https://www.jstor.org/stable/2992186>`_ for more details.
+
+    :param tskit.Tree tree: The tree to compute the Sackin index of.
+    :return : The Sackin index of the tree.
+    :rtype : float
+    """
     return _sackin_index(tree.virtual_root, tree.left_child_array, tree.right_sib_array)
 
 
