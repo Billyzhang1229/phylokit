@@ -5,7 +5,7 @@ import numba
 import numpy as np
 
 
-@numba.njit(cache=True, fastmath=True)
+@numba.njit(cache=True)
 def _sackin_index(virtual_root, left_child, right_sib):
     stack = []
     root = left_child[virtual_root]
