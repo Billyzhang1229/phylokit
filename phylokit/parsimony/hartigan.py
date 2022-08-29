@@ -1,5 +1,6 @@
 import numba
 import numpy as np
+import sgkit
 import xarray as xr
 
 
@@ -76,7 +77,9 @@ def numba_hartigan_parsimony_vectorised(
     num_nodes = left_child.shape[0] - 1
 
     optimal_set = np.zeros((num_nodes, num_sites, num_alleles), dtype=np.int8)
-    _hartigan_initialise_vectorised(optimal_set, genotypes, samples)
+    _hartigan_initialise_vectorised(
+        optimal_set, genotypes.reshape(num_sites, genotypes.shape[1]), samples
+    )
     _hartigan_preorder_vectorised(-1, optimal_set, left_child, right_sib)
     ancestral_state = np.argmax(optimal_set[-1], axis=1)
     return _hartigan_postorder_vectorised(
@@ -84,51 +87,77 @@ def numba_hartigan_parsimony_vectorised(
     )
 
 
-def get_hartigan_parsimony_score(ds, genotypes, alleles, chunk_size=1000):
+def ts_to_dataset(ts, chunks=None, samples=None):
+    """
+    Convert the specified tskit tree sequence into an sgkit dataset.
+    Note this just generates haploids for now - see the note above
+    in simulate_ts.
+    """
+    if samples is None:
+        samples = ts.samples()
+    tables = ts.dump_tables()
+    alleles = []
+    genotypes = []
+    max_alleles = 0
+    for var in ts.variants(samples=samples):
+        alleles.append(var.alleles)
+        max_alleles = max(max_alleles, len(var.alleles))
+        genotypes.append(var.genotypes)
+    padded_alleles = [
+        list(site_alleles) + [""] * (max_alleles - len(site_alleles))
+        for site_alleles in alleles
+    ]
+    alleles = np.array(padded_alleles).astype("S")
+    genotypes = np.expand_dims(genotypes, axis=2)
+
+    ds = sgkit.create_genotype_call_dataset(
+        variant_contig_names=["1"],
+        variant_contig=np.zeros(len(tables.sites), dtype=int),
+        variant_position=tables.sites.position.astype(int),
+        variant_allele=alleles,
+        sample_id=np.array([f"tsk_{u}" for u in samples]).astype("U"),
+        call_genotype=genotypes,
+    )
+    if chunks is not None:
+        ds = ds.chunk({"variants": chunks})
+    return ds
+
+
+def get_hartigan_parsimony_score(ds):
     """
     Calculate the parsimony score for each site in the dataset.
 
     :param ds: The dataset to calculate the parsimony score for.
-    :param genotypes: The genotypes to calculate the parsimony score for
-    e.g. ts.genotype_matrix().
-    :param alleles: The alleles to calculate the parsimony score for
-    e.g. ["A", "C", "G", "T"].
-    :param chunk_size: The size of the chunks to use when calculating the
-    parsimony score.
     :return: The parsimony score for each site in the dataset.
     :rtype: xarray.DataArray
     """
-    ds["sites_genotypes"] = (["sites", "samples"], genotypes)
-    chunked = ds.chunk({"sites": chunk_size})
 
     return xr.apply_ufunc(
         numba_hartigan_parsimony_vectorised,
-        chunked.node_left_child,
-        chunked.node_right_sib,
-        chunked.sample_node,
-        chunked.sites_genotypes,
-        alleles,
-        input_core_dims=[["nodes"], ["nodes"], ["samples"], ["samples"], ["alleles"]],
+        ds.node_left_child,
+        ds.node_right_sib,
+        ds.sample_node,
+        ds.call_genotype,
+        ds.variant_allele,
+        input_core_dims=[
+            ["nodes"],
+            ["nodes"],
+            ["samples"],
+            ["samples", "ploidy"],
+            ["alleles"],
+        ],
         dask="parallelized",
         output_dtypes=[np.uint32],
     ).compute()
 
 
-def append_parsimony_score(ds, genotypes, alleles, chunk_size=1000):
+def append_parsimony_score(ds):
     """
     Append the parsimony score to the dataset.
 
     :param ds: The dataset to append the parsimony score to.
-    :param genotypes: The genotypes to calculate the parsimony score for
-    e.g. ts.genotype_matrix().
-    :param alleles: The alleles to calculate the parsimony score for
-    e.g. ["A", "C", "G", "T"].
-    :param chunk_size: Number of sites to calculate the parsimony score for at a time.
-    The size of each chunk should be between 100MB and 1GB for optimal performance.
     :return: The dataset with the parsimony score appended.
     :rtype: xarray.Dataset
     """
-    ds["sites_parsimony_score"] = get_hartigan_parsimony_score(
-        ds, genotypes, alleles, chunk_size=chunk_size
-    )
+    ds["sites_parsimony_score"] = get_hartigan_parsimony_score(ds)
     return ds
