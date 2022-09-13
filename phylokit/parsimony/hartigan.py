@@ -148,7 +148,7 @@ def get_hartigan_parsimony_score(ds):
         ],
         dask="parallelized",
         output_dtypes=[np.uint32],
-    ).compute()
+    )
 
 
 def append_parsimony_score(ds):
