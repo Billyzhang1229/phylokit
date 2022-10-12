@@ -12,12 +12,12 @@ class Test_Hartigan_Parsimony_Vectorised:
         )
         return msprime.sim_mutations(tsa, rate=0.01, random_seed=seed)
 
-    def setup(self, random_seed=1234):
+    def setup(self):
         ts_in = self.simulate_ts(10, 100)
         ds = pk.ts_to_dataset(ts_in)
         ds_tree = pk.upgma(ds)
         ds_merged = ds_tree.merge(ds)
-        return ds_merged
+        return ds_merged.squeeze("ploidy")
 
     def result_dataset(self):
         pk_mts = self.setup()
@@ -32,7 +32,6 @@ class Test_Hartigan_Parsimony_Vectorised:
                 pk_mts.node_right_sib.data,
                 pk_mts.sample_node.data,
                 pk_mts.call_genotype.data,
-                pk_mts.variant_allele.data,
             ),
             np.array([1, 1, 1, 1, 1, 1]),
         )

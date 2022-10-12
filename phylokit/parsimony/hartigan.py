@@ -2,6 +2,7 @@ import numba
 import numpy as np
 import sgkit
 import xarray as xr
+from numba import int32
 
 
 @numba.njit()
@@ -60,16 +61,40 @@ def _hartigan_postorder_vectorised(node, state, optimal_set, left_child, right_s
     return mutations
 
 
-@numba.njit()
+@numba.jit()
 def _hartigan_initialise_vectorised(optimal_set, genotypes, samples):
     for k, site_genotypes in enumerate(genotypes):
         for j, u in enumerate(samples):
             optimal_set[u, k, site_genotypes[j]] = 1
 
 
+@numba.guvectorize(
+    [(int32[:], int32[:], int32[:], int32[:, :], int32[:])],
+    "(n),(n),(s),(v, s) -> (v)",
+)
 def numba_hartigan_parsimony_vectorised(
-    left_child, right_sib, samples, genotypes, alleles
+    left_child, right_sib, samples, genotypes, score
 ):
+    """
+    Calculate the parsimony score for each site in the dataset.
+
+    NOTE: The dimensions for each of the parameters should be fixed as follows:
+          (n),(n),(s),(v, s) -> (v)
+          where:
+            n = number of nodes
+            s = number of samples
+            v = number of variants
+
+    .. seealso::
+        See `Numba docs <https://numba.pydata.org/numba-doc/dev/user/vectorize.html>`_
+        for more details.
+
+    :param left_child: (dim: n) The left child of each node.
+    :param right_sib: (dim: n) The right sibling of each node.
+    :param samples: (dim: s) The samples in the tree.
+    :param genotypes: (dim: v, s) The genotype of each sample at each site.
+    :param score: (dim: v) The parsimony score for each site.
+    """
 
     # Simple version assuming non missing data and one root
     num_alleles = np.max(genotypes) + 1
@@ -77,12 +102,10 @@ def numba_hartigan_parsimony_vectorised(
     num_nodes = left_child.shape[0] - 1
 
     optimal_set = np.zeros((num_nodes, num_sites, num_alleles), dtype=np.int8)
-    _hartigan_initialise_vectorised(
-        optimal_set, genotypes.reshape(num_sites, genotypes.shape[1]), samples
-    )
+    _hartigan_initialise_vectorised(optimal_set, genotypes, samples)
     _hartigan_preorder_vectorised(-1, optimal_set, left_child, right_sib)
     ancestral_state = np.argmax(optimal_set[-1], axis=1)
-    return _hartigan_postorder_vectorised(
+    score[:] = _hartigan_postorder_vectorised(
         -1, ancestral_state, optimal_set, left_child, right_sib
     )
 
@@ -131,23 +154,21 @@ def get_hartigan_parsimony_score(ds):
     :return: The parsimony score for each site in the dataset.
     :rtype: xarray.DataArray
     """
-
     return xr.apply_ufunc(
         numba_hartigan_parsimony_vectorised,
         ds.node_left_child,
         ds.node_right_sib,
         ds.sample_node,
         ds.call_genotype,
-        ds.variant_allele,
         input_core_dims=[
             ["nodes"],
             ["nodes"],
             ["samples"],
-            ["samples", "ploidy"],
-            ["alleles"],
+            ["samples"],
         ],
         dask="parallelized",
-        output_dtypes=[np.uint32],
+        output_dtypes=[np.int32],
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
 
