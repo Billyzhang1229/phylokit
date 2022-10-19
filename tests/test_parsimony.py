@@ -5,6 +5,8 @@ import pytest
 import xarray.testing as xt
 
 import phylokit as pk
+from phylokit.inference import upgma
+from phylokit.parsimony.hartigan import ts_to_dataset
 
 
 def simulate_ts(num_samples, num_sites, seed=1234):
@@ -19,8 +21,8 @@ class Test_Hartigan_Parsimony_Vectorised:
         trees = []
         for i in range(1, 6):
             ts_in = simulate_ts(10, 100, seed=i * 88)
-            ds = pk.ts_to_dataset(ts_in)
-            ds_tree = pk.upgma(ds)
+            ds = ts_to_dataset(ts_in)
+            ds_tree = upgma(ds)
             ds_merged = ds_tree.merge(ds)
             trees.append(ds_merged.squeeze("ploidy"))
         return trees
