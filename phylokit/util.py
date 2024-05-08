@@ -14,6 +14,7 @@ def _is_unary(postorder, left_child, right_sib):
             v = right_sib[v]
         if num_children == 1:
             return True
+    return False
 
 
 def is_unary(ds):
